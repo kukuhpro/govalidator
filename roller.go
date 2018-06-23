@@ -1,6 +1,8 @@
 package govalidator
 
 import (
+	"fmt"
+
 	"reflect"
 	"strings"
 )
@@ -19,6 +21,7 @@ type roller struct {
 	typeName      string
 	tagIdentifier string
 	tagSeparator  string
+	rules         *MapData
 }
 
 // start start traversing through the tree
@@ -37,7 +40,7 @@ func (r *roller) start(iface interface{}) {
 	switch ift.Kind() {
 	case reflect.Struct:
 		if canInterface {
-			r.traverseStruct(ifv.Interface())
+			r.traverseStruct("", ifv.Interface())
 		}
 	case reflect.Map:
 		if ifv.Len() > 0 {
@@ -86,11 +89,37 @@ func (r *roller) push(key string, val interface{}) bool {
 	return true
 }
 
+func (r *roller) generateRulesSlice(iface interface{}, prefixFieldName string, lenSlice int) {
+	ift := reflect.TypeOf(iface)
+	rules := *r.rules
+	for i := 0; i < ift.NumField(); i++ {
+		switch ift.Kind() {
+		case reflect.Struct:
+			rfv := ift.Field(i)
+			var tagName string
+			if len(rfv.Tag.Get(r.tagIdentifier)) > 0 {
+				tags := strings.Split(rfv.Tag.Get(r.tagIdentifier), r.tagSeparator)
+				if tags[0] != "-" {
+					tagName = tags[0]
+				}
+			} else {
+				tagName = rfv.Name
+			}
+			if _, ok := rules[prefixFieldName+".*."+tagName]; ok {
+				for x := 0; x < lenSlice; x++ {
+					rules[prefixFieldName+"."+fmt.Sprint(x)+"."+tagName] = rules[prefixFieldName+".*."+tagName]
+				}
+				delete(rules, prefixFieldName+".*."+tagName)
+			}
+		}
+	}
+	r.rules = &rules
+}
+
 // traverseStruct through all structs and add it to root
-func (r *roller) traverseStruct(iface interface{}) {
+func (r *roller) traverseStruct(fieldName string, iface interface{}) {
 	ifv := reflect.ValueOf(iface)
 	ift := reflect.TypeOf(iface)
-
 	if ift.Kind() == reflect.Ptr {
 		ifv = ifv.Elem()
 		ift = ift.Elem()
@@ -99,8 +128,27 @@ func (r *roller) traverseStruct(iface interface{}) {
 	for i := 0; i < ift.NumField(); i++ {
 		v := ifv.Field(i)
 		rfv := ift.Field(i)
-
 		switch v.Kind() {
+		case reflect.Slice:
+			sft := reflect.ValueOf(v.Interface())
+			for x := 0; x < sft.Len(); x++ {
+				vft := sft.Index(x)
+				switch vft.Kind() {
+				case reflect.Struct:
+					var tagName string
+					if len(rfv.Tag.Get(r.tagIdentifier)) > 0 {
+						tags := strings.Split(rfv.Tag.Get(r.tagIdentifier), r.tagSeparator)
+						if tags[0] != "-" {
+							tagName = tags[0]
+						}
+					} else {
+						tagName = rfv.Name
+					}
+					fieldName = tagName + "." + fmt.Sprint(x) + "."
+					r.generateRulesSlice(vft.Interface(), tagName, sft.Len())
+					r.traverseStruct(fieldName, vft.Interface())
+				}
+			}
 		case reflect.Struct:
 			var typeName string
 			if len(rfv.Tag.Get(r.tagIdentifier)) > 0 {
@@ -111,6 +159,8 @@ func (r *roller) traverseStruct(iface interface{}) {
 			} else {
 				typeName = rfv.Name
 			}
+			typeName = fieldName + typeName
+
 			if v.CanInterface() {
 				switch v.Type().String() {
 				case "govalidator.Int":
@@ -125,7 +175,8 @@ func (r *roller) traverseStruct(iface interface{}) {
 					r.push(typeName, v.Interface())
 				default:
 					r.typeName = ift.Name()
-					r.traverseStruct(v.Interface())
+					r.traverseStruct("", v.Interface())
+
 				}
 			}
 		case reflect.Map:
@@ -139,7 +190,8 @@ func (r *roller) traverseStruct(iface interface{}) {
 				switch ptrField.Kind() {
 				case reflect.Struct:
 					if v.CanInterface() {
-						r.traverseStruct(v.Interface())
+						r.traverseStruct("", v.Interface())
+
 					}
 				case reflect.Map:
 					if v.CanInterface() {
@@ -153,17 +205,18 @@ func (r *roller) traverseStruct(iface interface{}) {
 				// add if first tag is not hyphen
 				if tags[0] != "-" {
 					if v.CanInterface() {
-						r.push(tags[0], v.Interface())
+						r.push(fieldName+tags[0], v.Interface())
+
 					}
 				}
 			} else {
 				if v.Kind() == reflect.Ptr {
 					if ifv.CanInterface() {
-						r.push(ift.Name()+"."+rfv.Name, ifv.Interface())
+						r.push(fieldName+ift.Name()+"."+rfv.Name, ifv.Interface())
 					}
 				} else {
 					if v.CanInterface() {
-						r.push(ift.Name()+"."+rfv.Name, v.Interface())
+						r.push(fieldName+ift.Name()+"."+rfv.Name, v.Interface())
 					}
 				}
 			}
@@ -186,14 +239,16 @@ func (r *roller) traverseMap(iface interface{}) {
 			switch reflect.TypeOf(v).Kind() {
 			case reflect.Struct:
 				r.typeName = k // set the map key as name
-				r.traverseStruct(v)
+				r.traverseStruct("", v)
+
 			case reflect.Map:
 				r.typeName = k // set the map key as name
 				r.traverseMap(v)
 			case reflect.Ptr: // if the field inside map is Ptr then get the type and underlying values as interface{}
 				switch reflect.TypeOf(v).Elem().Kind() {
 				case reflect.Struct:
-					r.traverseStruct(v)
+					r.traverseStruct("", v)
+
 				case reflect.Map:
 					switch v.(type) {
 					case *map[string]interface{}:

@@ -159,13 +159,15 @@ func (v *Validator) ValidateJSON() url.Values {
 	if v.Opts.TagIdentifier != "" {
 		r.setTagIdentifier(v.Opts.TagIdentifier)
 	}
+	r.rules = &v.Opts.Rules
 	r.setTagSeparator(tagSeparator)
 	r.start(v.Opts.Data)
 
 	//clean if the key is not exist or value is empty or zero value
 	nr := v.getNonRequiredJSONFields(r.getFlatMap())
 
-	for field, rules := range v.Opts.Rules {
+	for field, rules := range *r.rules {
+
 		if _, ok := nr[field]; ok {
 			continue
 		}
