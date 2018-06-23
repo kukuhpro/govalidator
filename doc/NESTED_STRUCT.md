@@ -24,11 +24,17 @@ type (
 		DOB      string `json:"dob"`
 		Address  address
 		Roles    []string `json:"roles"`
+		Images   []image `json:"images"`
 	}
 
 	address struct {
 		Village    string `json:"village"`
 		PostalCode string `json:"postalCode"`
+	}
+
+	image struct {
+		ImageName string `json:"image_name"`
+		Size      int `json:size"`
 	}
 )
 
@@ -45,6 +51,8 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		"village":    []string{"between:3,10"},
 		"postalCode": []string{"digits:4"},
 		"roles":      []string{"len:4"},
+		"images.*.image_name":     []string{"required"},
+		"images.*.size":           []string{"required", "numeric"}
 	}
 	opts := govalidator.Options{
 		Request:         r,     // request object
